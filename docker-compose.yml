@@ -3,7 +3,7 @@ services:
     image: postgres:16
 
     container_name: transactionshield-db
-    
+
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: transactionshield_dev
@@ -24,6 +24,42 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: transactionshield-api
+
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: transactionshield
+      DB_USER: postgres
+      DB_PASSWORD: transactionshield_dev
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      - ./models:/app/models:ro
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
     restart: unless-stopped
 

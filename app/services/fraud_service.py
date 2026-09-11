@@ -1,3 +1,4 @@
+from functools import lru_cache
 from pathlib import Path
 
 import joblib
@@ -16,17 +17,18 @@ MODEL_PATH = (
 MODEL_VERSION = "hist_gradient_boosting_v1"
 
 
-if not MODEL_PATH.exists():
-    raise FileNotFoundError(
-        f"Model not found: {MODEL_PATH}"
-    )
+@lru_cache(maxsize=1)
+def load_model_bundle():
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(
+            "Fraud model not found at "
+            f"{MODEL_PATH}. Run "
+            "'python -m "
+            "ml.train_hist_gradient_boosting' "
+            "to create it."
+        )
 
-
-model_bundle = joblib.load(MODEL_PATH)
-
-model = model_bundle["model"]
-encoder = model_bundle["encoder"]
-threshold = model_bundle["threshold"]
+    return joblib.load(MODEL_PATH)
 
 
 def predict_fraud(
@@ -37,6 +39,12 @@ def predict_fraud(
     old_balance_destination,
     new_balance_destination,
 ):
+    model_bundle = load_model_bundle()
+
+    model = model_bundle["model"]
+    encoder = model_bundle["encoder"]
+    threshold = model_bundle["threshold"]
+
     numeric_values = np.array(
         [
             [
@@ -48,7 +56,7 @@ def predict_fraud(
             ]
         ],
         dtype=np.float32,
-       )
+    )
 
     categorical_values = pd.DataFrame(
         {
