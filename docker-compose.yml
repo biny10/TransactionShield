@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16
+
+    container_name: transactionshield-db
+    
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: transactionshield_dev
+      POSTGRES_DB: transactionshield
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./data/raw:/data/raw:ro
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U postgres -d transactionshield
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+    restart: unless-stopped
+
+
+volumes:
+  postgres_data:
