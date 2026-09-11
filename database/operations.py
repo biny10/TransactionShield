@@ -49,3 +49,17 @@ def create_account(
             )
 
             return cursor.fetchone()
+
+def create_merchant(merchant_code):
+    sql = """
+        INSERT INTO merchants (merchant_code)
+        VALUES (%s)
+        ON CONFLICT (merchant_code)
+        DO UPDATE SET merchant_code = EXCLUDED.merchant_code
+        RETURNING merchant_id, merchant_code;
+    """
+
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(sql, (merchant_code,))
+            return cursor.fetchone()

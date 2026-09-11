@@ -51,13 +51,11 @@ except ValueError as error:
 
 balances_after, count_after = get_test_state()
 
-
 print("\nBefore:", balances_before)
 print("After: ", balances_after)
 
 print(f"\nApplication transactions before: {count_before}")
 print(f"Application transactions after:  {count_after}")
-
 
 assert balances_before == balances_after
 assert count_before == count_after
