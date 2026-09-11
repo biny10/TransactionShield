@@ -2,19 +2,28 @@ from decimal import Decimal
 
 from database.connection import get_connection
 
+from app.services.fraud_service import predict_fraud
+from app.services.fraud_service import store_fraud_prediction
 ####Transfer###
-def transfer_money(sender_account_id, receiver_account_id, amount):
+def transfer_money(
+    sender_account_id,
+    receiver_account_id,
+    amount,
+):
     amount = Decimal(str(amount))
 
     if amount <= 0:
-        raise ValueError("Transfer amount must be greater than zero")
+        raise ValueError(
+            "Transfer amount must be greater than zero"
+        )
 
     if sender_account_id == receiver_account_id:
-        raise ValueError("Sender and receiver must be different")
-    #assure atomic
+        raise ValueError(
+            "Sender and receiver must be different"
+        )
+
     with get_connection() as connection:
         with connection.cursor() as cursor:
-            # Lock both accounts until the transaction finishes.
             cursor.execute(
                 """
                 SELECT
@@ -38,10 +47,14 @@ def transfer_money(sender_account_id, receiver_account_id, amount):
             }
 
             if sender_account_id not in accounts:
-                raise ValueError("Sender account does not exist")
+                raise ValueError(
+                    "Sender account does not exist"
+                )
 
             if receiver_account_id not in accounts:
-                raise ValueError("Receiver account does not exist")
+                raise ValueError(
+                    "Receiver account does not exist"
+                )
 
             sender = accounts[sender_account_id]
             receiver = accounts[receiver_account_id]
@@ -50,40 +63,70 @@ def transfer_money(sender_account_id, receiver_account_id, amount):
             receiver_balance = receiver[1]
 
             if sender[2] != "active":
-                raise ValueError("Sender account is not active")
+                raise ValueError(
+                    "Sender account is not active"
+                )
 
             if receiver[2] != "active":
-                raise ValueError("Receiver account is not active")
+                raise ValueError(
+                    "Receiver account is not active"
+                )
 
             if sender_balance < amount:
                 raise ValueError("Insufficient funds")
 
-            new_sender_balance = sender_balance - amount
-            new_receiver_balance = receiver_balance + amount
+            proposed_sender_balance = (
+                sender_balance - amount
+            )
 
-            cursor.execute(
-                """
-                UPDATE accounts
-                SET balance = %s
-                WHERE account_id = %s;
-                """,
-                (
-                    new_sender_balance,
-                    sender_account_id,
+            proposed_receiver_balance = (
+                receiver_balance + amount
+            )
+
+            prediction = predict_fraud(
+                transaction_type="TRANSFER",
+                amount=amount,
+                old_balance_origin=sender_balance,
+                new_balance_origin=(
+                    proposed_sender_balance
+                ),
+                old_balance_destination=(
+                    receiver_balance
+                ),
+                new_balance_destination=(
+                    proposed_receiver_balance
                 ),
             )
 
-            cursor.execute(
-                """
-                UPDATE accounts
-                SET balance = %s
-                WHERE account_id = %s;
-                """,
-                (
-                    new_receiver_balance,
-                    receiver_account_id,
-                ),
-            )
+            if prediction["predicted_fraud"]:
+                transaction_status = "flagged"
+
+            else:
+                transaction_status = "completed"
+
+                cursor.execute(
+                    """
+                    UPDATE accounts
+                    SET balance = %s
+                    WHERE account_id = %s;
+                    """,
+                    (
+                        proposed_sender_balance,
+                        sender_account_id,
+                    ),
+                )
+
+                cursor.execute(
+                    """
+                    UPDATE accounts
+                    SET balance = %s
+                    WHERE account_id = %s;
+                    """,
+                    (
+                        proposed_receiver_balance,
+                        receiver_account_id,
+                    ),
+                )
 
             cursor.execute(
                 """
@@ -98,8 +141,8 @@ def transfer_money(sender_account_id, receiver_account_id, amount):
                     old_balance_destination,
                     new_balance_destination,
                     rule_flagged_fraud,
-                    sender_account_id,
-                    receiver_account_id,
+                    origin_account_id,
+                    destination_account_id,
                     transaction_status
                 )
                 VALUES (
@@ -115,7 +158,7 @@ def transfer_money(sender_account_id, receiver_account_id, amount):
                     FALSE,
                     %s,
                     %s,
-                    'completed'
+                    %s
                 )
                 RETURNING transaction_id;
                 """,
@@ -123,19 +166,25 @@ def transfer_money(sender_account_id, receiver_account_id, amount):
                     amount,
                     f"A{sender_account_id}",
                     sender_balance,
-                    new_sender_balance,
+                    proposed_sender_balance,
                     f"A{receiver_account_id}",
                     receiver_balance,
-                    new_receiver_balance,
+                    proposed_receiver_balance,
                     sender_account_id,
                     receiver_account_id,
+                    transaction_status,
                 ),
             )
 
             transaction_id = cursor.fetchone()[0]
 
-    return transaction_id
+            store_fraud_prediction(
+                cursor=cursor,
+                transaction_id=transaction_id,
+                prediction=prediction,
+            )
 
+    return transaction_id
 ####CASH_IN###
 
 def cash_in(account_id, amount):
