@@ -183,3 +183,19 @@ CREATE TABLE fraud_predictions (
 
     UNIQUE (transaction_id, model_version)
 );
+
+
+-- Machine-learning training view
+CREATE OR REPLACE VIEW ml_training_features AS
+SELECT
+    transaction_id,
+    transaction_type,
+    amount,
+    old_balance_origin,
+    new_balance_origin,
+    old_balance_destination,
+    new_balance_destination,
+    actual_fraud AS is_fraud
+FROM transactions
+WHERE data_source = 'paysim'
+  AND actual_fraud IS NOT NULL;
