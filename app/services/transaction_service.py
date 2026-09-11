@@ -282,7 +282,9 @@ def cash_out(account_id, amount):
     amount = Decimal(str(amount))
 
     if amount <= 0:
-        raise ValueError("Cash-out amount must be greater than zero")
+        raise ValueError(
+            "Cash-out amount must be greater than zero"
+        )
 
     with get_connection() as connection:
         with connection.cursor() as cursor:
@@ -299,30 +301,55 @@ def cash_out(account_id, amount):
             account = cursor.fetchone()
 
             if account is None:
-                raise ValueError("Account does not exist")
+                raise ValueError(
+                    "Account does not exist"
+                )
 
             old_balance = account[0]
             account_status = account[1]
 
             if account_status != "active":
-                raise ValueError("Account is not active")
+                raise ValueError(
+                    "Account is not active"
+                )
 
             if old_balance < amount:
-                raise ValueError("Insufficient funds")
+                raise ValueError(
+                    "Insufficient funds"
+                )
 
-            new_balance = old_balance - amount
-
-            cursor.execute(
-                """
-                UPDATE accounts
-                SET balance = %s
-                WHERE account_id = %s;
-                """,
-                (
-                    new_balance,
-                    account_id,
-                ),
+            proposed_new_balance = (
+                old_balance - amount
             )
+
+            prediction = predict_fraud(
+                transaction_type="CASH_OUT",
+                amount=amount,
+                old_balance_origin=old_balance,
+                new_balance_origin=(
+                    proposed_new_balance
+                ),
+                old_balance_destination=0.00,
+                new_balance_destination=0.00,
+            )
+
+            if prediction["predicted_fraud"]:
+                transaction_status = "flagged"
+
+            else:
+                transaction_status = "completed"
+
+                cursor.execute(
+                    """
+                    UPDATE accounts
+                    SET balance = %s
+                    WHERE account_id = %s;
+                    """,
+                    (
+                        proposed_new_balance,
+                        account_id,
+                    ),
+                )
 
             cursor.execute(
                 """
@@ -352,7 +379,7 @@ def cash_out(account_id, amount):
                     0.00,
                     FALSE,
                     %s,
-                    'completed'
+                    %s
                 )
                 RETURNING transaction_id;
                 """,
@@ -360,12 +387,19 @@ def cash_out(account_id, amount):
                     amount,
                     f"A{account_id}",
                     old_balance,
-                    new_balance,
+                    proposed_new_balance,
                     account_id,
+                    transaction_status,
                 ),
             )
 
             transaction_id = cursor.fetchone()[0]
+
+            store_fraud_prediction(
+                cursor=cursor,
+                transaction_id=transaction_id,
+                prediction=prediction,
+            )
 
     return transaction_id
 
@@ -373,7 +407,9 @@ def make_payment(account_id, merchant_id, amount):
     amount = Decimal(str(amount))
 
     if amount <= 0:
-        raise ValueError("Payment amount must be greater than zero")
+        raise ValueError(
+            "Payment amount must be greater than zero"
+        )
 
     with get_connection() as connection:
         with connection.cursor() as cursor:
@@ -393,14 +429,18 @@ def make_payment(account_id, merchant_id, amount):
             account = cursor.fetchone()
 
             if account is None:
-                raise ValueError("Account does not exist")
+                raise ValueError(
+                    "Account does not exist"
+                )
 
             old_balance = account[0]
             account_status = account[1]
             account_type = account[2]
 
             if account_status != "active":
-                raise ValueError("Account is not active")
+                raise ValueError(
+                    "Account is not active"
+                )
 
             if account_type == "savings":
                 raise ValueError(
@@ -408,7 +448,9 @@ def make_payment(account_id, merchant_id, amount):
                 )
 
             if old_balance < amount:
-                raise ValueError("Insufficient funds")
+                raise ValueError(
+                    "Insufficient funds"
+                )
 
             cursor.execute(
                 """
@@ -422,22 +464,44 @@ def make_payment(account_id, merchant_id, amount):
             merchant = cursor.fetchone()
 
             if merchant is None:
-                raise ValueError("Merchant does not exist")
+                raise ValueError(
+                    "Merchant does not exist"
+                )
 
             merchant_code = merchant[0]
-            new_balance = old_balance - amount
 
-            cursor.execute(
-                """
-                UPDATE accounts
-                SET balance = %s
-                WHERE account_id = %s;
-                """,
-                (
-                    new_balance,
-                    account_id,
-                ),
+            proposed_new_balance = (
+                old_balance - amount
             )
+
+            prediction = predict_fraud(
+                transaction_type="PAYMENT",
+                amount=amount,
+                old_balance_origin=old_balance,
+                new_balance_origin=(
+                    proposed_new_balance
+                ),
+                old_balance_destination=0.00,
+                new_balance_destination=0.00,
+            )
+
+            if prediction["predicted_fraud"]:
+                transaction_status = "flagged"
+
+            else:
+                transaction_status = "completed"
+
+                cursor.execute(
+                    """
+                    UPDATE accounts
+                    SET balance = %s
+                    WHERE account_id = %s;
+                    """,
+                    (
+                        proposed_new_balance,
+                        account_id,
+                    ),
+                )
 
             cursor.execute(
                 """
@@ -469,7 +533,7 @@ def make_payment(account_id, merchant_id, amount):
                     FALSE,
                     %s,
                     %s,
-                    'completed'
+                    %s
                 )
                 RETURNING transaction_id;
                 """,
@@ -477,13 +541,21 @@ def make_payment(account_id, merchant_id, amount):
                     amount,
                     f"A{account_id}",
                     old_balance,
-                    new_balance,
+                    proposed_new_balance,
                     merchant_code,
                     account_id,
                     merchant_id,
+                    transaction_status,
                 ),
             )
+
             transaction_id = cursor.fetchone()[0]
+
+            store_fraud_prediction(
+                cursor=cursor,
+                transaction_id=transaction_id,
+                prediction=prediction,
+            )
 
     return transaction_id
 
@@ -495,13 +567,19 @@ def debit_account(
     amount = Decimal(str(amount))
 
     if amount <= 0:
-        raise ValueError("Debit amount must be greater than zero")
+        raise ValueError(
+            "Debit amount must be greater than zero"
+        )
 
     if not destination_code:
-        raise ValueError("Destination code is required")
+        raise ValueError(
+            "Destination code is required"
+        )
 
     if len(destination_code) > 20:
-        raise ValueError("Destination code cannot exceed 20 characters")
+        raise ValueError(
+            "Destination code cannot exceed 20 characters"
+        )
 
     with get_connection() as connection:
         with connection.cursor() as cursor:
@@ -518,30 +596,55 @@ def debit_account(
             account = cursor.fetchone()
 
             if account is None:
-                raise ValueError("Account does not exist")
+                raise ValueError(
+                    "Account does not exist"
+                )
 
             old_balance = account[0]
             account_status = account[1]
 
             if account_status != "active":
-                raise ValueError("Account is not active")
+                raise ValueError(
+                    "Account is not active"
+                )
 
             if old_balance < amount:
-                raise ValueError("Insufficient funds")
+                raise ValueError(
+                    "Insufficient funds"
+                )
 
-            new_balance = old_balance - amount
-
-            cursor.execute(
-                """
-                UPDATE accounts
-                SET balance = %s
-                WHERE account_id = %s;
-                """,
-                (
-                    new_balance,
-                    account_id,
-                ),
+            proposed_new_balance = (
+                old_balance - amount
             )
+
+            prediction = predict_fraud(
+                transaction_type="DEBIT",
+                amount=amount,
+                old_balance_origin=old_balance,
+                new_balance_origin=(
+                    proposed_new_balance
+                ),
+                old_balance_destination=0.00,
+                new_balance_destination=0.00,
+            )
+
+            if prediction["predicted_fraud"]:
+                transaction_status = "flagged"
+
+            else:
+                transaction_status = "completed"
+
+                cursor.execute(
+                    """
+                    UPDATE accounts
+                    SET balance = %s
+                    WHERE account_id = %s;
+                    """,
+                    (
+                        proposed_new_balance,
+                        account_id,
+                    ),
+                )
 
             cursor.execute(
                 """
@@ -571,7 +674,7 @@ def debit_account(
                     0.00,
                     FALSE,
                     %s,
-                    'completed'
+                    %s
                 )
                 RETURNING transaction_id;
                 """,
@@ -579,12 +682,19 @@ def debit_account(
                     amount,
                     f"A{account_id}",
                     old_balance,
-                    new_balance,
+                    proposed_new_balance,
                     destination_code,
                     account_id,
+                    transaction_status,
                 ),
             )
 
             transaction_id = cursor.fetchone()[0]
+
+            store_fraud_prediction(
+                cursor=cursor,
+                transaction_id=transaction_id,
+                prediction=prediction,
+            )
 
     return transaction_id
